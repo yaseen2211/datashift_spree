@@ -27,8 +27,24 @@ module DatashiftSpree
 
       require File.expand_path('config/environment.rb')
 
-      ActiveRecord::Base.connection.execute("TRUNCATE spree_products_taxons")
-      ActiveRecord::Base.connection.execute("TRUNCATE spree_products_promotion_rules")
+      join_tables_to_delete = ["spree_products_taxons", "spree_products_promotion_rules"]
+
+      begin
+        join_tables_to_delete.each do |table|
+          puts "Clearing join #{table}"
+          ActiveRecord::Base.connection.execute("TRUNCATE #{table}")
+        end
+      rescue ActiveRecord::StatementInvalid => e
+        if e.message =~ /SQLite3::SQLException/
+          join_tables_to_delete.each do |table|
+            puts "SQLITE Clearing join #{table}"
+            ActiveRecord::Base.connection.execute("DELETE FROM #{table}")
+            ActiveRecord::Base.connection.execute("DELETE FROM sqlite_sequence where name='#{table}'")
+          end
+        else
+          raise e
+        end
+      end
       
       cleanup =  %w{ Image OptionType OptionValue 
                     Product Property ProductProperty ProductOptionType 
