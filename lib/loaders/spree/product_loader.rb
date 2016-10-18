@@ -430,7 +430,11 @@ module DataShift
           stock_coh_list.each_with_index do |stock_coh, i|
   
             # count_on_hand column MUST HAVE "stock_location_name:variant_count_on_hand" format
-            stock_location_name, variant_count_on_hand = stock_coh.split(Delimiters::name_value_delim)
+            if(stock_coh.to_s.include?(Delimiters::name_value_delim))
+              stock_location_name, variant_count_on_hand = stock_coh.split(Delimiters::name_value_delim)
+            else
+              stock_location_name, variant_count_on_hand = [nil, stock_coh]
+            end
 
             logger.info "Setting #{variant_count_on_hand} items for stock location #{stock_location_name}..."
   
@@ -462,7 +466,11 @@ module DataShift
             stock_location_name, master_count_on_hand = (current_value.to_s.split(Delimiters::multi_assoc_delim).first).split(Delimiters::name_value_delim)
             puts "WARNING: Multiple count_on_hand values specified but no Variants/OptionTypes created"
           else
-            stock_location_name, master_count_on_hand = current_value.split(Delimiters::name_value_delim)
+            if(current_value.to_s.include?(Delimiters::name_value_delim))
+              stock_location_name, master_count_on_hand = current_value.split(Delimiters::name_value_delim)
+            else
+              stock_location_name, master_count_on_hand = [nil, current_value]
+            end
           end
           if not stock_location_name # No Stock Location referenced, fallback to default one...
             logger.info "No Stock Location was referenced. Adding count_on_hand to default Stock Location. Use 'stock_location_name:master_count_on_hand' format to specify prefered Stock Location"

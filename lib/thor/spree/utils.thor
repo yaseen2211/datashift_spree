@@ -27,7 +27,7 @@ module DatashiftSpree
 
       require File.expand_path('config/environment.rb')
 
-      join_tables_to_delete = ["spree_products_taxons", "spree_products_promotion_rules"]
+      join_tables_to_delete = ["spree_products_taxons", "spree_products_promotion_rules", "spree_option_values_variants"]
 
       begin
         join_tables_to_delete.each do |table|
@@ -48,7 +48,7 @@ module DatashiftSpree
       
       cleanup =  %w{ Image OptionType OptionValue 
                     Product Property ProductProperty ProductOptionType 
-                    Variant
+                    Variant StockMovement StockItem StockTransfer
       }
 
       cleanup += ["Taxonomy", "Taxon"] if(options[:taxons])
