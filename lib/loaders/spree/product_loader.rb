@@ -117,7 +117,8 @@ module DataShift
             end
 
           else
-            super
+            #super
+            puts "Variant Price, What if mix of product and variants"
           end
 
         elsif(current_method_detail.operator?('variant_cost_price') && current_value)
@@ -138,7 +139,8 @@ module DataShift
             end
 
           else
-            super
+            #super
+            puts "Variant Cost Price, What if mix of product and variants"
           end          
           
         elsif(current_method_detail.operator?('variant_sku') && current_value)
@@ -159,7 +161,8 @@ module DataShift
             end
 
           else
-            super
+            #super
+            puts "Variant Sku, What if mix of product and variants"
           end
           
         #elsif(current_value && (current_method_detail.operator?('count_on_hand') || current_method_detail.operator?('on_hand')) )
@@ -636,6 +639,7 @@ module DataShift
         # ... or just single Master Product?
         elsif(@load_object.variants.size == 0)
           
+            return true # as variant_images is not defined, also assume no image
             if(current_value.to_s.include?(Delimiters::multi_value_delim))
               # multiple images
               images = current_value.to_s.split(Delimiters::multi_value_delim)
