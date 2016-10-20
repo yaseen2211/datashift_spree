@@ -31,7 +31,7 @@ def get_variants_option_values(row, res)
   res
 end
 
-pt = "/Users/pikender/spree/marketing/products-import/CSV samples/Shopify/products/products_export_variants-copy.csv"
+pt = "products_export.csv"
 start_handle = "ZIBBERISh_LOREM_IPSUM"
 a = []
 CSV.foreach(pt, headers: true, header_converters: :symbol, encoding: 'ISO-8859-1') do |row|
@@ -51,6 +51,10 @@ CSV.foreach(pt, headers: true, header_converters: :symbol, encoding: 'ISO-8859-1
       p "Skip variant Data"
     end
   else
+    unless (row[:title] && row[:title].present?)
+      p "Invalid Product Data"
+      next
+    end
     p "Stop and Process"
     start_handle = row[:handle]
     p "Its New Product Data"
@@ -80,27 +84,38 @@ CSV.foreach(pt, headers: true, header_converters: :symbol, encoding: 'ISO-8859-1
 end
 
 a.each do |r|
-  r[:variants] = r[:variants][:options].join("|")
-  r[:variant_sku] = r[:variant_sku].join("|")
-  r[:variant_weight] = r[:variant_weight].join("|")
-  r[:variant_price] = r[:variant_price].join("|")
-  r[:variant_cost_price] = r[:variant_cost_price].join("|")
-  r[:variant_images] = r[:variant_images].join("|")
+  if(r[:variants][:options].size > 0)
+    r[:variants] = r[:variants][:options].join("|")
+    r[:variant_sku] = r[:variant_sku].join("|")
+    r[:variant_weight] = r[:variant_weight].join("|")
+    r[:variant_price] = r[:variant_price].join("|")
+    r[:variant_cost_price] = r[:variant_cost_price].join("|")
+    r[:variant_images] = r[:variant_images].join("|")
+  else
+    r[:variants] = ""
+    r[:variant_sku] = ""
+    r[:variant_weight] = ""
+    r[:variant_price] = ""
+    r[:variant_cost_price] = ""
+    r[:variant_images] = ""
+  end
   r[:stock_items] = r[:stock_items].join("|")
 end
 
-headers = [:slug, :name, :description, :meta_title, :meta_description, :meta_keywords, :available_on,
-           :images, :price, :shipping_category, :tax_category, :weight, :sku, :variants, :variant_sku,
+headers = [:slug, :price, :name, :description, :meta_title, :meta_description, :meta_keywords, :available_on,
+           :images, :shipping_category, :tax_category, :weight, :sku, :variants, :variant_sku,
            :variant_weight, :variant_price, :variant_cost_price, :variant_images, :stock_items, :gift_card]
 
-CSV.open("/Users/pikender/Desktop/myfile.csv", "w") do |csv|
+export_file = "products_export_variants_spree.csv"
+
+CSV.open(export_file, "w") do |csv|
   b = []
   headers.each do |h|
     b << h.to_s
   end
   csv << b
 end
-CSV.open("/Users/pikender/Desktop/myfile.csv", "a") do |csv|
+CSV.open(export_file, "a") do |csv|
   a.each do |r|
     b = []
     headers.each do |h|
