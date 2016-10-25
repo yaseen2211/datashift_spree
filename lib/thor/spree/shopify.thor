@@ -140,7 +140,7 @@ module DatashiftSpree
 
       loader.perform_load(input, options)
 
-      puts "Spree Order count now : #{Spree::Order.count}"
+      # puts "Spree Order count now : #{Spree::Order.count}"
 
     end
 
