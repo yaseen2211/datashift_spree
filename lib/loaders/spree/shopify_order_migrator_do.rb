@@ -15,10 +15,6 @@ module DataShift
   module SpreeEcom
 
     class ShopifyOrderLoader < SpreeBaseLoader
-      class CacheOrderData
-        attr_accessor :shipping_method, :tax_category, :tax_rate, :row
-      end
-
       module Shopify
         class RawOrder
           ORDER_HEADERS = [:name, :email, :financial_status, :paid_at, :fulfillment_status, :fulfilled_at, :accepts_marketing,
@@ -145,27 +141,42 @@ module DataShift
                 end
                 t.tax_rate = tax_rate
                 t.adjustment = make_tax_adjustments(t.tax_rate, order, tax_category_value)
-                t.shipping_method, t.shipping_category = create_shipping_method(t.tax_category)
+                t.shipping_method, t.shipping_category = create_shipping_method(t.tax_category, t.zone)
                 self.tax_related_records << t
               end
             end
           end
 
-          def create_shipping_method(tax_category)
+          def create_shipping_method(tax_category, zone)
             shipping_category = Spree::ShippingCategory.where(name: get_shipping_method).first_or_create!
-            shipping_method = Spree::ShippingMethod.first ##shipping_category.shipping_methods.where(name: get_shipping_method, tax_category: tax_category).first_or_create!
+            shipping_method = Spree::ShippingMethod.where(name: get_shipping_method, tax_category: tax_category).first
+            unless shipping_method
+              shipping_method = Spree::ShippingMethod.create!({
+                name: get_shipping_method,
+                zones: [zone],
+                calculator: Spree::Calculator::Shipping::FlatRate.create!, # Check the values needed
+                shipping_categories: [shipping_category],
+                tax_category: tax_category
+              })
+              shipping_category.shipping_methods.where(name: get_shipping_method, tax_category: tax_category).first_or_create!
+            end
             [shipping_method, shipping_category]
           end
 
           def get_shipping_method
-            shipping_method || "Manual"
+            ((shipping_method == "") || (shipping_method.nil?)) ? "Manual" : shipping_method
           end
 
           def make_payment
-            attributes = {name: "Shopify Import", active: true}
+            attributes = {name: "Shopify Import", active: true, type: "Spree::PaymentMethod::Check"} # Add New Type to signify Shopify  # Rails.application.config.spree.payment_methods?
             method = Spree::PaymentMethod.where(attributes).first_or_create!
             self.payment = order.payments.create!(:amount => total, :payment_method => method)
             payment.update_columns(:state => 'completed')
+          end
+
+          def make_shipments_and_ship
+            order.create_proposed_shipments
+            order.shipments.update_all(state: "shipped", shipped_at: fulfilled_at)
           end
 
           def add_line_items
@@ -242,25 +253,7 @@ module DataShift
           else
             if last_order
               p %Q{ process last order - #{last_order.name} }
-              begin
-                Spree::Order.transaction do
-                  last_order.make_order
-                  last_order.add_line_items
-                  last_order.make_tax_category_and_rate
-                  last_order.order = last_order.order.reload
-                  last_order.order.create_proposed_shipments
-                  last_order.make_payment
-
-                  last_order.order.state = "complete"
-                  last_order.order.payment_state = "paid"
-                  last_order.order.shipment_state = "shipped"
-                  last_order.order.completed_at = Time.now - 1.day
-                  last_order.order.save!
-                end
-              rescue => e
-                p "Order Processing failed for #{last_order.name} with reason #{e}"
-                raise e
-              end
+              finish_order(last_order)
             end
             order_count += 1
             p %Q{ Create Next Order - #{row["Name"]} }
@@ -270,154 +263,36 @@ module DataShift
           end
         end
 
-        p "Process Last Order - #{last_order}"
+        p "Process Last Order - #{last_order.name}"
+        finish_order(last_order)
         p "Order Count #{order_count}"
+      ensure
+        Spree::Config[:track_inventory_levels] = true
       end
 
       private
 
-        def cached_order_data
-          @cached_order_data ||= CacheOrderData.new
-        end
+        def finish_order(last_order)
+          begin
+            Spree::Order.transaction do
+              last_order.make_order
+              last_order.add_line_items
+              last_order.make_tax_category_and_rate
+              last_order.order = last_order.order.reload
+              last_order.make_shipments_and_ship
 
-        def reset_cached_order_data
-          @cached_order_data = nil
-        end
+              last_order.make_payment
 
-        def create_order
-          order = Spree::Order.create!(
-            :number => "Shopify#{row["Name"]}",
-            :email => row["Email"],
-            :item_total => row["Subtotal"],
-            :adjustment_total => 150.95,
-            :shipment_total => row["Shipping"],
-            :additional_tax_total => row["Taxes"],
-            :promo_total => row["Discount Amount"],
-            :total => row["Total"],
-            :shipping_method => cached_order_data.shipping_method,
-            :shipping_address => create_address("Shipping"),
-            :billing_address => create_address("Billing"),
-            :user => create_user
-          )
-        end
-
-        def create_user
-          Spree::User.where(email: row["Email"]).first_or_create!
-        end
-
-        def create_address(name)
-          Spree::Address.where(address_attributes(name)).first_or_create!
-        end
-
-        def address_attributes(prefix)
-          {
-            firstname: row["#{prefix} Name"],
-            lastname: row["#{prefix} Name"],
-            address1: row["#{prefix} Address1"],
-            address2: row["#{prefix} Address2"],
-            city: row["#{prefix} City"],
-            zipcode: row["#{prefix} Zip"],
-            phone: row["#{prefix} Phone"],
-            state_name: row["#{prefix} Province"],
-            company: row["#{prefix} Company"],
-            country: Spree::Country.where(iso: row["#{prefix} Country"]).first,
-            state: Spree::State.where(abbr: row["#{prefix} Province"]).first
-          }
-        end
-
-        def create_line_item(order)
-          order.line_items.create!(
-            :variant => Spree::Variant.find_by_sku!(row[get_line_item_variant_sku_col]),
-            :quantity => row[get_line_item_qty_col],
-            :price => row[get_line_item_price_col],
-            :cost_price => row[get_line_item_cost_price_col])
-        end
-
-        def get_line_item_variant_sku_col
-          "Lineitem sku"
-        end
-
-        def get_line_item_qty_col
-          "Lineitem quantity"
-        end
-
-        def get_line_item_price_col
-          "Lineitem price"
-        end
-
-        def get_line_item_cost_price_col
-          "Lineitem compare at price"
-        end
-
-        def process_order
-          order.create_proposed_shipments
-
-          order.state = "complete"
-          order.completed_at = Time.now - 1.day
-          order.save!
-        end
-
-        def create_tax_adjustments(tax_rate, order, amount)
-          order.adjustments.create!(
-            :amount => amount,
-            :source => tax_rate,
-            :order  => order,
-            :label => "Tax",
-            :state => "closed",
-            :mandatory => true)
-        end
-
-        def create_tax_category_and_rate(row, order)
-          (1..5).each do |i|
-            if(row[tax_category_col_name]).present?
-              tax_category = Spree::TaxCategory.where(name: row[tax_category_col_name(i)]).first_or_create!
-              zone = Spree::Zone.where(name: row[shipping_country_name]).first_or_create!
-              amount = row[order_subtotal_col].to_f
-              tax_rate = tax_category.tax_rates.where(amount: amount/row[tax_category_col_name(i)], zone: zone).first_or_create!
-              create_tax_adjustments(tax_rate, order, amount)
-              create_shipping_method
+              last_order.order.state = "complete"
+              last_order.order.payment_state = "paid"
+              last_order.order.shipment_state = "shipped"
+              last_order.order.completed_at = Time.now - 1.day
+              last_order.order.save!
             end
+          rescue => e
+            p "Order Processing failed for #{last_order.name} with reason #{e}"
+            raise e
           end
-        end
-
-        def create_shipping_method(tax_category)
-          shipping_category = Spree::ShippingCategory.where(name: row[shipping_method_col_name]).first_or_create!
-          shipping_method = shipping_category.shipping_methods.where(name: row[shipping_method_col_name], tax_category: tax_category).first_or_create!
-        end
-
-        def shipping_method_col_name
-          "Shipping Method"
-        end
-
-        def tax_category_col_name(i)
-          "Tax #{i} Name"
-        end
-
-        def tax_category_col_name(i)
-          "Tax #{i} Value"
-        end
-
-        def order_subtotal_col
-          "Subtotal"
-        end
-
-        def shipping_country_name
-          "Shipping Country"
-        end
-
-        def create_payment
-          method = create_payment_method
-          payment = order.payments.create!(:amount => order.total, :payment_method => method)
-          payment.update_columns(:state => 'completed')
-        end
-
-        def create_payment_method
-          attributes = {name: "Shopify Import", active: true}
-          method = Spree::PaymentMethod.where(attributes).first
-          unless method
-            method = Spree::PaymentMethod.create!(attributes)
-          end
-          method
         end
     end
   end
