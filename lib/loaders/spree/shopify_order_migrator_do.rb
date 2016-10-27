@@ -37,10 +37,21 @@ module DataShift
 
           HEADERS = ORDER_HEADERS + LINE_ITEM_HEADERS+ BILLING_HEADERS + SHIPPING_HEADERS + TAX_HEADERS
 
-          CREATED_RECORDS = [:order, :ship_address, :bill_address, :user, :payment]
+          CREATED_RECORDS = [
+            :order, :ship_address, :bill_address, :user,
+            :payment, :payment_method, :zone, :zone_members,
+            :tax_related_records, :line_items, :shipping_category,
+            :shipping_method, :shipment_related_records
+          ]
 
           class TaxRelated
-            ATTRS = [:shipping_category, :shipping_method, :tax_category, :tax_rate, :zone, :adjustment]
+            ATTRS = [:tax_rate, :zone, :zone_members, :adjustment, :tax_category]
+
+            attr_accessor *ATTRS
+          end
+
+          class ShipmentRelated
+            ATTRS = [:shipment, :shipment_rate]
 
             attr_accessor *ATTRS
           end
@@ -49,10 +60,11 @@ module DataShift
 
           attr_accessor *HEADERS
           attr_accessor *CREATED_RECORDS
-          attr_accessor :tax_related_records, :line_items, :raw_line_items
+          attr_accessor :raw_line_items
 
           def initialize
             @tax_related_records = []
+            @shipment_related_records = []
             @line_items = []
             @raw_line_items = []
           end
@@ -86,9 +98,8 @@ module DataShift
               state_name: shipping_province,
               company: shipping_company,
               country: Spree::Country.where(iso: shipping_country).first,
-              state: Spree::State.where(abbr: shipping_province).first
             }
-            ).first_or_create!
+            ).create!
           end
 
           def make_billing_address
@@ -104,9 +115,8 @@ module DataShift
               state_name: billing_province,
               company: billing_company,
               country: Spree::Country.where(iso: billing_country).first,
-              state: Spree::State.where(abbr: billing_province).first
             }
-            ).first_or_create!
+            ).create!
           end
 
           def make_user
@@ -129,38 +139,51 @@ module DataShift
                 amount = subtotal.to_f
                 tax_category_name = self.send(:"tax_#{i}_name")
                 tax_category_value = self.send(:"tax_#{i}_value").to_f
-                t = TaxRelated.new
-                t.tax_category = Spree::TaxCategory.where(name: tax_category_name).first_or_create!
-                t.zone = Spree::Zone.where(name: shipping_country).first_or_create!
-                tax_rate_attributes = { name: "Shopify-#{shipping_country}-#{tax_category_name}", amount: tax_category_value/amount, zone: t.zone, tax_category: t.tax_category }
+                tax_category = Spree::TaxCategory.where(name: tax_category_name).first_or_create!
+                zone = Spree::Zone.where(name: shipping_country).first_or_create!
+                zone_members = zone.zone_members.create!(zoneable: Spree::Country.find_by!(iso: shipping_country))
+                tax_rate_attributes = {
+                  name: "Shopify-#{shipping_country}-#{tax_category_name}",
+                  amount: tax_category_value/amount,
+                  zone: zone,
+                  tax_category: tax_category
+                }
                 tax_rate = Spree::TaxRate.where(tax_rate_attributes).first
                 unless tax_rate
                   tax_rate = Spree::TaxRate.create(tax_rate_attributes)
                   tax_rate.calculator = Spree::Calculator::DefaultTax.create!
                   tax_rate.save!
                 end
+                t = TaxRelated.new
+                t.tax_category = tax_category
+                t.zone = zone
+                t.zone_members = zone_members
                 t.tax_rate = tax_rate
                 t.adjustment = make_tax_adjustments(t.tax_rate, order, tax_category_value)
-                t.shipping_method, t.shipping_category = create_shipping_method(t.tax_category, t.zone)
                 self.tax_related_records << t
               end
             end
           end
 
-          def create_shipping_method(tax_category, zone)
+          def create_shipping_method
+            zone = Spree::Zone.where(name: shipping_country).first_or_create!
+            zone_members = zone.zone_members.create!(zoneable: Spree::Country.find_by!(iso: shipping_country))
             shipping_category = Spree::ShippingCategory.where(name: get_shipping_method).first_or_create!
-            shipping_method = Spree::ShippingMethod.where(name: get_shipping_method, tax_category: tax_category).first
+            shipping_method = Spree::ShippingMethod.where(name: get_shipping_method).first
+            # Does tax_category makes sense here ??
             unless shipping_method
               shipping_method = Spree::ShippingMethod.create!({
                 name: get_shipping_method,
                 zones: [zone],
                 calculator: Spree::Calculator::Shipping::FlatRate.create!, # Check the values needed
-                shipping_categories: [shipping_category],
-                tax_category: tax_category
+                shipping_categories: [shipping_category]
               })
-              shipping_category.shipping_methods.where(name: get_shipping_method, tax_category: tax_category).first_or_create!
             end
-            [shipping_method, shipping_category]
+            self.zone = zone
+            self.zone_members = zone_members
+            self.shipping_category = shipping_category
+            self.shipping_method = shipping_method
+            shipping_method
           end
 
           def get_shipping_method
@@ -170,13 +193,24 @@ module DataShift
           def make_payment
             attributes = {name: "Shopify Import", active: true, type: "Spree::PaymentMethod::Check"} # Add New Type to signify Shopify  # Rails.application.config.spree.payment_methods?
             method = Spree::PaymentMethod.where(attributes).first_or_create!
-            self.payment = order.payments.create!(:amount => total, :payment_method => method)
+            payment = order.payments.create!(:amount => total, :payment_method => method)
             payment.update_columns(:state => 'completed')
+            self.payment = payment
+            self.payment_method = method
           end
 
           def make_shipments_and_ship
+            shipping_method = create_shipping_method
             order.create_proposed_shipments
-            order.shipments.update_all(state: "shipped", shipped_at: fulfilled_at)
+            order.shipments.each do |shipment|
+              rate = shipment.shipping_rates.create!(shipping_method: shipping_method, cost: 0)
+              shipment.selected_shipping_rate_id = rate.id
+              shipment.update_attributes!(state: "shipped", shipped_at: fulfilled_at)
+              t = ShipmentRelated.new
+              t.shipment_rate = rate
+              t.shipment = shipment
+              self.shipment_related_records << t
+            end
           end
 
           def add_line_items
@@ -193,7 +227,7 @@ module DataShift
 
           def make_order
             self.order = Spree::Order.create!(
-              :number => "Shopify#{name}",
+              :number => "Shopify-#{name.gsub('#', '')}",
               :email => email,
               :item_total => subtotal,
               # :adjustment_total => (taxes + discount_amount),
@@ -235,37 +269,48 @@ module DataShift
 
       def perform_csv_load(file_name, options = {})
         Spree::Config[:track_inventory_levels] = false
-        # headers = "Name","Email","Financial Status","Paid at","Fulfillment Status","Fulfilled at","Accepts Marketing","Currency","Subtotal","Shipping","Taxes","Total","Discount Code","Discount Amount","Shipping Method","Created at","Lineitem quantity","Lineitem name","Lineitem price","Lineitem compare at price","Lineitem sku","Lineitem requires shipping","Lineitem taxable","Lineitem fulfillment status","Billing Name","Billing Street","Billing Address1","Billing Address2","Billing Company","Billing City","Billing Zip","Billing Province","Billing Country","Billing Phone","Shipping Name","Shipping Street","Shipping Address1","Shipping Address2","Shipping Company","Shipping City","Shipping Zip","Shipping Province","Shipping Country","Shipping Phone","Notes","Note Attributes","Cancelled at","Payment Method","Payment Reference","Refunded Amount","Vendor","Id","Tags","Risk Level","Source","Lineitem discount","Tax 1 Name","Tax 1 Value","Tax 2 Name","Tax 2 Value","Tax 3 Name","Tax 3 Value","Tax 4 Name","Tax 4 Value","Tax 5 Name","Tax 5 Value"
+        # headers = "Name","Email","Financial Status","Paid at","Fulfillment Status","Fulfilled at",
+        # "Accepts Marketing","Currency","Subtotal","Shipping","Taxes","Total","Discount Code",
+        # "Discount Amount","Shipping Method","Created at","Lineitem quantity","Lineitem name",
+        # "Lineitem price","Lineitem compare at price","Lineitem sku","Lineitem requires shipping",
+        # "Lineitem taxable","Lineitem fulfillment status","Billing Name","Billing Street",
+        # "Billing Address1","Billing Address2","Billing Company","Billing City","Billing Zip",
+        # "Billing Province","Billing Country","Billing Phone","Shipping Name","Shipping Street",
+        # "Shipping Address1","Shipping Address2","Shipping Company","Shipping City","Shipping Zip",
+        # "Shipping Province","Shipping Country","Shipping Phone","Notes","Note Attributes",
+        # "Cancelled at","Payment Method","Payment Reference","Refunded Amount","Vendor","Id",
+        # "Tags","Risk Level","Source","Lineitem discount","Tax 1 Name","Tax 1 Value",
+        # "Tax 2 Name","Tax 2 Value","Tax 3 Name","Tax 3 Value","Tax 4 Name","Tax 4 Value",
+        # "Tax 5 Name","Tax 5 Value"
         order_count = 0
         last_order = nil
         CSV.foreach(file_name, headers: true, header_converters: :symbol, encoding: 'ISO-8859-1') do |row|
-        #CSV.foreach(file_name, headers: true, encoding: 'ISO-8859-1') do |row|
           if(row.empty?)
-            puts "Finished - Last Row #{row}"
+            logger.info "Finished - Last Row #{row}"
             break
           end
 
           name = row.fetch(:name)
           financial_status = row.fetch(:financial_status)
           if(!name.nil? && !name.empty?) && (financial_status.nil? || financial_status.empty?)   # Financial Status empty on LI rows
-            p "Process Line Item"
+            logger.info "Process Line Item"
             last_order.raw_line_items << Shopify::RawOrder.line_item_init(row)
           else
             if last_order
-              p %Q{ process last order - #{last_order.name} }
+              logger.info %Q{ process last order - #{last_order.name} }
               finish_order(last_order)
             end
             order_count += 1
-            p %Q{ Create Next Order - #{row["Name"]} }
+            logger.info %Q{ Create Next Order - #{row["Name"]} }
             o = Shopify::RawOrder.init(row)
             last_order = o
             last_order.raw_line_items << Shopify::RawOrder.line_item_init(row)
           end
         end
 
-        p "Process Last Order - #{last_order.name}"
+        logger.info "Process Last Order - #{last_order.name}"
         finish_order(last_order)
-        p "Order Count #{order_count}"
+        logger.info "Order Count #{order_count}"
       ensure
         Spree::Config[:track_inventory_levels] = true
       end
@@ -273,25 +318,38 @@ module DataShift
       private
 
         def finish_order(last_order)
-          begin
-            Spree::Order.transaction do
-              last_order.make_order
-              last_order.add_line_items
-              last_order.make_tax_category_and_rate
-              last_order.order = last_order.order.reload
-              last_order.make_shipments_and_ship
+          if((last_order.fulfillment_status == "fulfilled") && (last_order.financial_status == "paid"))
+            begin
+              logger.info "ShopifyOrderImport :: #{last_order.name} Started Import for Order"
+              Spree::Order.transaction do
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Create Order"
+                last_order.make_order
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Create Line Items"
+                last_order.add_line_items
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Create Tax Adjustments"
+                last_order.make_tax_category_and_rate
+                last_order.order = last_order.order.reload
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Create Shipments"
+                last_order.make_shipments_and_ship
 
-              last_order.make_payment
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Create Payment"
+                last_order.make_payment
 
-              last_order.order.state = "complete"
-              last_order.order.payment_state = "paid"
-              last_order.order.shipment_state = "shipped"
-              last_order.order.completed_at = Time.now - 1.day
-              last_order.order.save!
+                logger.info "ShopifyOrderImport ::  #{last_order.name} :: Finalise Order"
+                last_order.order.state = "complete"
+                last_order.order.payment_state = "paid"
+                last_order.order.shipment_state = "shipped"
+                last_order.order.completed_at = Time.now - 1.day
+                last_order.order.save!
+              end
+            rescue => e
+              logger.error "ShopifyOrderImport :: #{last_order.name} :: Order Processing failed for #{last_order.name} with reason #{e}"
+              raise e if true ## Add a halt/no-halt variable to stop execution at failure
+            ensure
+              logger.info "ShopifyOrderImport :: #{last_order.name} :: Finishing Log Import for Order #{last_order.name}"
             end
-          rescue => e
-            p "Order Processing failed for #{last_order.name} with reason #{e}"
-            raise e
+          else
+            logger.info "ShopifyOrderImport :: #{last_order.name} :: Order Skipped as either not paid or not fullfilled #{last_order.name} :: #{last_order.financial_status} => #{last_order.fulfillment_status}"
           end
         end
     end
