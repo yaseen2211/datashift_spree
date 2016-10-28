@@ -202,12 +202,14 @@ module DataShift
           def make_shipments_and_ship
             shipping_method = create_shipping_method
             order.create_proposed_shipments
+            # Shipping Methods are picked from Products and not here :(
             order.shipments.each do |shipment|
-              rate = shipment.shipping_rates.create!(shipping_method: shipping_method, cost: 0)
-              shipment.selected_shipping_rate_id = rate.id
-              shipment.update_attributes!(state: "shipped", shipped_at: fulfilled_at)
+              # It resulted in creation of shipping rates again and failed on unique indexes :(
+              #rate = shipment.shipping_rates.create!(shipping_method: shipping_method, cost: 0)
+              #shipment.selected_shipping_rate_id = rate.id
+              shipment.update_columns(state: "shipped", shipped_at: fulfilled_at)
               t = ShipmentRelated.new
-              t.shipment_rate = rate
+              t.shipment_rate = shipment.selected_shipping_rate
               t.shipment = shipment
               self.shipment_related_records << t
             end
@@ -268,6 +270,9 @@ module DataShift
       end
 
       def perform_csv_load(file_name, options = {})
+
+        order_patch_for_no_mails
+
         Spree::Config[:track_inventory_levels] = false
         # headers = "Name","Email","Financial Status","Paid at","Fulfillment Status","Fulfilled at",
         # "Accepts Marketing","Currency","Subtotal","Shipping","Taxes","Total","Discount Code",
@@ -316,6 +321,18 @@ module DataShift
       end
 
       private
+
+        def order_patch_for_no_mails
+          Spree::Order.class_eval do
+            def confirmation_required?
+              false
+            end
+
+            def payment_required?
+              false
+            end
+          end
+        end
 
         def finish_order(last_order)
           if((last_order.fulfillment_status == "fulfilled") && (last_order.financial_status == "paid"))
