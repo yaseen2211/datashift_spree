@@ -15,6 +15,13 @@ module DataShift
 
         add_email_attr_to_address
 
+        @@allowed_address_type = ["ship_address", "bill_address"]
+        @@default_address_type = @@allowed_address_type.first
+        @@address_type = @@allowed_address_type.include?(opts[:address_type]) ? opts[:address_type] : @@default_address_type
+        @@address_type_id = (@@address_type == @@default_address_type) ? :ship_address_id : :bill_address_id
+
+        p @@address_type_id
+
         super( DataShift::SpreeEcom::get_address_class, address, opts)
 
         raise "Failed to create Address for loading" unless @load_object
@@ -51,13 +58,13 @@ module DataShift
               user = DataShift::SpreeEcom::get_user_class.where(email: user_email).first
               if(user)
                 logger.info "Skipping User creation as User with email - #{user.email} and id: #{user.id} present"
-                if(ship_address = DataShift::SpreeEcom::get_address_class.where(id: user.ship_address_id).first)
+                if(ship_address = DataShift::SpreeEcom::get_address_class.where(id: user.send(@@address_type_id)).first)
                   logger.info "Skipping Address creation as User has valid ship address already #{ship_address.inspect}"
                 else
                   if(@load_object.save)
                     logger.info "Address created successfully"
                     ship_address = @load_object.reload
-                    user.update_attributes!(ship_address: ship_address)
+                    user.update_attributes!(@@address_type_id => ship_address.id)
                     logger.info "New Address assigned to user successfully"
                   else
                     logger.error "Address creation failed with error #{@load_object.errors.inspect}"
@@ -72,7 +79,7 @@ module DataShift
                   logger.error "Address creation failed with error #{@load_object.errors.inspect}"
                   ship_address = nil
                 end
-                new_user = DataShift::SpreeEcom::get_user_class.create!(email: user_email, password: "vinsol@123", ship_address_id: ship_address.try(:id))
+                new_user = DataShift::SpreeEcom::get_user_class.create!("email" => user_email, "password" => "vinsol@123", @@address_type_id => ship_address.try(:id))
                 logger.info "New User with email #{user_email} and attributes #{new_user.inspect}"
               end
             else

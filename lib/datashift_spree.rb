@@ -127,4 +127,5 @@ DataShift::SpreeEcom::require_libraries
 DataShift::SpreeEcom::require_datashift_spree
 
 require 'datashift_spree/exceptions'
+require 'datashift_spree/transforms/shopify_import'
 
