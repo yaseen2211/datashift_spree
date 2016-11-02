@@ -45,6 +45,14 @@ module DataShift
     def self.get_product_class
       get_spree_class 'Product'
     end
+
+    def self.get_address_class
+      get_spree_class 'Address'
+    end
+
+    def self.get_user_class
+      get_spree_class 'User'
+    end
     
     # Return the right CLASS to attach Product images to
     # for the callers version of Spree

@@ -13,12 +13,17 @@ module DataShift
         super( msg )
       end
     end
-  
+
     class ImageLoadError < DataShift::DataShiftException
       def initialize( msg )
         super( msg )
       end
     end
-    
+
+    class AddressLoadError < DataShift::DataShiftException
+      def initialize( msg )
+        super( msg )
+      end
+    end
   end
 end

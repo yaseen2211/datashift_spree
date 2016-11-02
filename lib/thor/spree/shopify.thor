@@ -21,26 +21,17 @@ module DatashiftSpree
     method_option :input, :aliases => '-i', :required => true, :desc => "The import file (.xls or .csv)"
     method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
     method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
+    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
 
     def users()
+
+      input = options[:input]
 
       # We're assuming run from a rails app/top level dir
       require File.expand_path('config/environment.rb')
 
-      max_user = Alchemy::User.last.id
-
-      begin
-        invoke 'datashift:import:csv', [], options.merge({model: Alchemy::User})
-      rescue => e
-        log :error, "Fcm Config was not validated. Please check log above, fix and rerun"
-        exit(-1)
-      end
-
-      default_password = SecureRandom.hex(13)
-
-      puts "default_password is #{default_password}"
-
-      users =  Alchemy::User.where( "id > ?", max_user )
+      loader = DataShift::SpreeEcom::ShopifyCustomerLoader.new(nil, :verbose => options[:verbose])
+      loader.perform_load(input, options)
     end
 
 
