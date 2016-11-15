@@ -12,7 +12,7 @@ module DataShift
   module SpreeEcom
     class ShopifyProductBinder < Binder
       def forced_inclusion_columns
-        extra_cols = ["images"]
+        extra_cols = ["images", "variant_sku"]
         super() + extra_cols
       end
     end
@@ -102,6 +102,8 @@ module DataShift
                     add_images(value, doc_context, binder)
                   elsif(value && model_method.operator?('variant_images'))
                     add_variant_images(value, doc_context, binder)
+                  elsif(value && model_method.operator?('variant_sku'))
+                    add_variant_skus(value, doc_context, binder)
                   else
                     context.process
                   end
@@ -826,6 +828,29 @@ module DataShift
               puts "ERROR - Failed to assign attachment to #{load_object.master.class} #{load_object.master.id}"
               logger.error("Failed to assign attachment to #{load_object.master.class} #{load_object.master.id}")
             end
+          end
+        end
+
+        def add_variant_skus(value, doc_context, binder)
+          doc_context.save_if_new
+          load_object = doc_context.load_object
+
+          logger.info "Add variants skus"
+
+          if(load_object.variants.size > 0)
+            if(value.to_s.include?(binder.multi_assoc_delim))
+
+              # Check if we processed Option Types and assign  per option
+              skus = get_each_assoc(value, binder)
+
+              if(load_object.variants.size == skus.size)
+                load_object.variants.each_with_index {|v, i| v.sku = skus[i].to_s; v.save! }
+              else
+                puts "WARNING: SKU entries did not match number of Variants - None Set"
+              end
+            end
+          else
+            raise "No Variants in SKUs"
           end
         end
     end
