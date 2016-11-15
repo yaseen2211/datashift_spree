@@ -21,130 +21,38 @@ module DatashiftSpree
     method_option :input, :aliases => '-i', :required => true, :desc => "The import file (.xls or .csv)"
     method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
     method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
+    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
+    method_option :address_type, :aliases => '-a', :type => :string, :default => "ship_address", :desc => "Ship or Bill Address Type"
 
     def users()
-
-      # We're assuming run from a rails app/top level dir
+      # Address class as user is imported along with address
       require File.expand_path('config/environment.rb')
 
-      max_user = Alchemy::User.last.id
-
-      begin
-        invoke 'datashift:import:csv', [], options.merge({model: Alchemy::User})
-      rescue => e
-        log :error, "Fcm Config was not validated. Please check log above, fix and rerun"
-        exit(-1)
-      end
-
-      default_password = SecureRandom.hex(13)
-
-      puts "default_password is #{default_password}"
-
-      users =  Alchemy::User.where( "id > ?", max_user )
+      importer = DataShift::SpreeEcom::ShopifyCustomerLoader.new(options["address_type"])
+      import(importer, options)
     end
 
-
-    desc "promos", "Populate Spree Promotion data from Shopify .xls (Excel) or CSV file"
-
-    method_option :input, :aliases => '-i', :required => true, :desc => "The import file (.xls or .csv)"
-    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
-    method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
-    method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
-
-    def promos()
-
-      # We're assuming run from a rails app/top level dir
-      require File.expand_path('config/environment.rb')
-
-      input = options[:input]
-
-      require 'shopify_promotions_migrator'
-
-      loader = DataShift::SpreeEcom::ShopifyPromotionsMigrator.new(:verbose => options[:verbose])
-
-      # YAML configuration file to drive defaults etc
-
-      if(options[:config])
-        raise "Bad Config - Cannot find specified file #{options[:config]}" unless File.exists?(options[:config])
-
-        puts "Processing config from: #{options[:config]}"
-
-        loader.configure_from( options[:config] )
+    no_commands do
+      def start_connections
+        if File.exist?(File.expand_path('config/environment.rb'))
+          begin
+            require File.expand_path('config/environment.rb')
+          rescue => e
+            logger.error("Failed to initialise ActiveRecord : #{e.message}")
+            raise DataShift::ConnectionError.new("Failed to initialise ActiveRecord : #{e.message}")
+          end
+        else
+          raise DataShift::PathError.new('No config/environment.rb found - cannot initialise ActiveRecord')
+        end
       end
 
-      loader.perform_load(input, options)
-    end
+      def import(importer, options)
+        logger.info "Datashift: Starting Import from #{options[:input]}"
 
+        importer.configure_from( options[:config] ) if(options[:config])
 
-    desc "report_promo_data", "Report on available Spree Promotion data - rules/calculators etc"
-
-    def report_promo_data()
-
-      # We're assuming run from a rails app/top level dir
-      require File.expand_path('config/environment.rb')
-
-      puts "\n*** Spree::Promotion columns***"
-      puts "\t#{Spree::Promotion.columns.map(&:name).inspect}\n"
-
-      # get the available Rules
-      rules = Rails.application.config.spree.promotions.rules
-
-      puts "\n*** Available Rules***"
-      rules.each {|x| puts "\t#{x.inspect}\n" }
-
-      calculators = Rails.application.config.spree.calculators.promotion_actions_create_adjustments
-      puts "\n*** Available Calculators***"
-      calculators.each {|x| puts "\t#{x.inspect}\n" }
-
-    end
-
-    desc "orders", "Populate Spree Order data from Shopify .xls (Excel) or CSV file"
-
-    method_option :input, :aliases => '-i', :required => true, :desc => "The import file (.xls or .csv)"
-    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
-    method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
-    method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
-    method_option :delete_existing,  :type => :boolean, :desc => "WARNING - test mode delete existing Orders first"
-
-    def orders()
-
-      # assuming run from a rails app/top level dir...
-      require File.expand_path('config/environment.rb')
-
-      # Use default logging formatter so that PID and timestamp are not suppressed.
-      Rails.application.config.log_formatter = ::Logger::Formatter.new
-
-
-      if(options[:delete_existing])
-        puts "DELETING ALL ORDERS!!!!!!!"
-        sleep 1
-        Spree::Order.delete_all
-        Spree::LineItem.delete_all
-        puts "DELETED ALL ORDERS!!!!!!!"
+        importer.run(options[:input], DataShift::SpreeEcom.get_address_class)
       end
-      input = options[:input]
-
-      require 'shopify_order_migrator'
-
-      loader = DataShift::SpreeEcom::ShopifyOrderLoader.new( Spree::Order, {:verbose => options[:verbose]})
-
-      # YAML configuration file to drive defaults etc
-
-      if(options[:config])
-        raise "Bad Config - Cannot find specified file #{options[:config]}" unless File.exists?(options[:config])
-
-        puts "Processing config from: #{options[:config]}"
-
-        loader.configure_from( options[:config] )
-      end
-
-      loader.perform_load(input, options)
-
-      puts "Spree Order count now : #{Spree::Order.count}"
-
     end
-
-
-
   end
 end
