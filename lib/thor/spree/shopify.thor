@@ -48,6 +48,21 @@ module DatashiftSpree
       order_import(options)
     end
 
+    desc "products", "Populate Spree Product data from CSV file"
+
+    method_option :input, :aliases => '-i', :required => true, :desc => "The .csv import file"
+    method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
+    method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
+    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
+
+    def products()
+      require File.expand_path('config/environment.rb')
+
+			p "Start Shopify Product Import"
+
+      product_import(options)
+    end
+
     no_commands do
       def start_connections
         if File.exist?(File.expand_path('config/environment.rb'))
@@ -80,6 +95,16 @@ module DatashiftSpree
         importer.configure_from( options[:config] ) if(options[:config])
 
         importer.run(options[:input], DataShift::SpreeEcom.get_order_class)
+      end
+
+      def product_import(options)
+        importer = DataShift::SpreeEcom::ShopifyProductLoader.new
+
+        logger.info "Datashift: Starting Product Import from #{options[:input]}"
+
+        importer.configure_from( options[:config] ) if(options[:config])
+
+        importer.run(options[:input], DataShift::SpreeEcom.get_product_class)
       end
     end
   end
