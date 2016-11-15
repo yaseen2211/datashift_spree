@@ -18,6 +18,22 @@ module DataShift
     end
 
     class ShopifyProductLoader < CsvLoader
+      def initialize
+        @@image_klass ||= DataShift::SpreeEcom::get_spree_class('Image')
+        @@option_type_klass ||= DataShift::SpreeEcom::get_spree_class('OptionType')
+        @@option_value_klass ||= DataShift::SpreeEcom::get_spree_class('OptionValue')
+        @@product_klass ||= DataShift::SpreeEcom::get_spree_class('Product')
+        @@property_klass ||= DataShift::SpreeEcom::get_spree_class('Property')
+        @@product_property_klass ||= DataShift::SpreeEcom::get_spree_class('ProductProperty')
+        @@stock_location_klass ||= DataShift::SpreeEcom::get_spree_class('StockLocation')
+        @@stock_movement_klass ||= DataShift::SpreeEcom::get_spree_class('StockMovement')
+        @@taxonomy_klass ||= DataShift::SpreeEcom::get_spree_class('Taxonomy')
+        @@taxon_klass ||= DataShift::SpreeEcom::get_spree_class('Taxon')
+        @@variant_klass ||= DataShift::SpreeEcom::get_spree_class('Variant')
+
+        super
+      end
+
 			def perform_load( _options = {} )
 				require 'csv'
 
@@ -71,6 +87,8 @@ module DataShift
 								begin
                   if(value && model_method.operator?('taxons'))
                     add_taxons(value, doc_context, binder)
+                  elsif(value && model_method.operator?('product_properties'))
+                    add_properties(value, doc_context, binder)
                   else
                     context.process
                   end
@@ -109,6 +127,10 @@ module DataShift
         value.to_s.split( binder.multi_assoc_delim )
       end
 
+      def get_each_val(value, binder)
+        value.to_s.split( binder.name_value_delim )
+      end
+
       private
 
         def add_taxons(value, doc_context, binder)
@@ -125,7 +147,7 @@ module DataShift
 
             parent_name = name_list.shift
 
-            parent_taxonomy = DataShift::SpreeEcom::get_spree_class('Taxonomy').where(:name => parent_name).first_or_create
+            parent_taxonomy = @@taxonomy_klass.where(:name => parent_name).first_or_create
 
             raise DataShift::DataProcessingError.new("Could not find or create Taxonomy #{parent_name}") unless parent_taxonomy
 
@@ -135,7 +157,7 @@ module DataShift
             taxons = name_list.collect do |name|
 
               begin
-                taxon = DataShift::SpreeEcom::get_spree_class('Taxon').where(:name => name, :parent_id => parent.id, :taxonomy_id => parent_taxonomy.id).first_or_create
+                taxon = @@taxon_klass.where(:name => name, :parent_id => parent.id, :taxonomy_id => parent_taxonomy.id).first_or_create
 
                 # pre Rails 4 -  taxon = @@taxon_klass.find_or_create_by_name_and_parent_id_and_taxonomy_id(name, parent && parent.id, parent_taxonomy.id)
 
@@ -160,6 +182,48 @@ module DataShift
 
             load_object.taxons << unique_list unless(unique_list.empty?)
             # puts load_object.taxons.inspect
+
+          end
+
+          # Special case for ProductProperties since it can have additional value applied.
+          # A list of Properties with a optional Value - supplied in form :
+          #   property_name:value|property_name|property_name:value
+          #  Example :
+          #  test_pp_002|test_pp_003:Example free value|yet_another_property
+
+          def add_properties(value, doc_context, binder)
+            # TODO smart column ordering to ensure always valid by time we get to associations
+            doc_context.save_if_new
+            load_object = doc_context.load_object
+
+            property_list = get_each_assoc(value, binder)
+
+            property_list.each do |pstr|
+
+              # Special case, we know we lookup on name so operator is effectively the name to lookup
+              find_by_name, find_by_value = get_each_val( pstr, binder )
+
+              raise "Cannot find Property via #{find_by_name} (with value #{find_by_value})" unless(find_by_name)
+
+              property = @@property_klass.where(:name => find_by_name).first
+
+              unless property
+                property = @@property_klass.create( :name => find_by_name, :presentation => find_by_name.humanize)
+                logger.info "Created New Property #{property.inspect}"
+              end
+
+              if(property)
+                  # Property now protected from mass assignment
+                  x = @@product_property_klass.new( :value => find_by_value )
+                  x.property = property
+                  x.save
+                  load_object.product_properties << x
+                  logger.info "Created New ProductProperty #{x.inspect}"
+              else
+                puts "WARNING: Property #{find_by_name} NOT found - Not set Product"
+              end
+
+            end
 
           end
       end
