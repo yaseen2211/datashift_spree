@@ -12,7 +12,7 @@ module DataShift
   module SpreeEcom
     class ShopifyProductBinder < Binder
       def forced_inclusion_columns
-        extra_cols = ["images", "variant_sku"]
+        extra_cols = ["images", "variant_sku", "variant_price", "variant_cost_price"]
         super() + extra_cols
       end
     end
@@ -104,6 +104,10 @@ module DataShift
                     add_variant_images(value, doc_context, binder)
                   elsif(value && model_method.operator?('variant_sku'))
                     add_variant_skus(value, doc_context, binder)
+                  elsif(value && model_method.operator?('variant_price'))
+                    add_variant_prices(value, doc_context, binder)
+                  elsif(value && model_method.operator?('variant_cost_price'))
+                    add_variant_cost_prices(value, doc_context, binder)
                   else
                     context.process
                   end
@@ -853,6 +857,53 @@ module DataShift
             raise "No Variants in SKUs"
           end
         end
+
+        def add_variant_prices(value, doc_context, binder)
+          doc_context.save_if_new
+          load_object = doc_context.load_object
+
+          logger.info "Add variants prices"
+
+          if(load_object.variants.size > 0)
+            if(value.to_s.include?(binder.multi_assoc_delim))
+
+              # Check if we processed Option Types and assign  per option
+              prices = get_each_assoc(value, binder)
+
+              if(load_object.variants.size == prices.size)
+                load_object.variants.each_with_index {|v, i| v.price = prices[i].to_s; v.save! }
+              else
+                puts "WARNING: price entries did not match number of Variants - None Set"
+              end
+            end
+          else
+            raise "No Variants in prices"
+          end
+        end
+
+        def add_variant_cost_prices(value, doc_context, binder)
+          doc_context.save_if_new
+          load_object = doc_context.load_object
+
+          logger.info "Add variants cost_prices"
+
+          if(load_object.variants.size > 0)
+            if(value.to_s.include?(binder.multi_assoc_delim))
+
+              # Check if we processed Option Types and assign  per option
+              cost_prices = get_each_assoc(value, binder)
+
+              if(load_object.variants.size == cost_prices.size)
+                load_object.variants.each_with_index {|v, i| v.cost_price = cost_prices[i].to_s; v.save! }
+              else
+                puts "WARNING: cost_price entries did not match number of Variants - None Set"
+              end
+            end
+          else
+            raise "No Variants in cost_prices"
+          end
+        end
+
     end
   end
 end
