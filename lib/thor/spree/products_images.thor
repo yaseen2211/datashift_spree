@@ -24,55 +24,11 @@ module DatashiftSpree
 
     include DataShift::Logging
 
-    desc "products", "Populate Spree Product/Variant data from .xls (Excel) or CSV file"
-
-    method_option :input, :aliases => '-i', :required => true, :desc => "The import file (.xls or .csv)"
-    method_option :sku_prefix, :aliases => '-s', :desc => "Prefix to add to each SKU before saving Product"
-    method_option :image_path_prefix, :aliases => '-p', :desc => "Prefix to add to image path for importing from disk"
-    method_option :verbose, :aliases => '-v', :type => :boolean, :desc => "Verbose logging"
-    method_option :config, :aliases => '-c',  :type => :string, :desc => "Configuration file containg defaults or over rides in YAML"
-    method_option :dummy, :aliases => '-d', :type => :boolean, :desc => "Dummy run, do not actually save Image or Product"
-
-    def products()
-
-      # TODO - We're assuming run from a rails app/top level dir...
-      # ...can we make this more robust ? e.g what about when using active record but not in Rails app,
-      require File.expand_path('config/environment.rb')
-
-      input = options[:input]
-
-      require 'product_loader'
-
-      loader = DataShift::SpreeEcom::ProductLoader.new( nil, {:verbose => options[:verbose]})
-
-      # YAML configuration file to drive defaults etc
-
-      if(options[:config])
-        raise "Bad Config - Cannot find specified file #{options[:config]}" unless File.exists?(options[:config])
-
-        puts "DataShift::Product proccssing config from: #{options[:config]}"
-
-        loader.configure_from( options[:config] )
-      else
-        loader.populator.set_default_value('available_on', Time.now.to_s(:db) )
-        loader.populator.set_default_value('cost_price', 0.0 )
-        loader.populator.set_default_value('price', 0.0 )
-      end
-
-      loader.set_prefix('sku', options[:sku_prefix] ) if(options[:sku_prefix])
-
-      puts "DataShift::Product starting upload from file: #{input}"
-
-      opts = options.dup
-      opts[:mandatory] = ['sku', 'name', 'price']
-
-      loader.perform_load(input, opts)
-    end
-
 
     desc "attach_images", "Populate Products with images from Excel/CSV\nProvide column SKU or Name\nColumn containing full path to image can be named 'attachment', 'images' or 'path' "
     # :dummy => dummy run without actual saving to DB
-    method_option :input, :aliases => '-i', :required => true, :desc => "The 2 column import file (.xls or .csv)"
+    method_option :input, :aliases => '-i', :required => true, :desc => "The 2 column import file .csv"
+    method_option :image_path_prefix, :aliases => '-p', :desc => "Provide a path prefix in case of relative paths"
 
     def attach_images()
 
@@ -80,9 +36,20 @@ module DatashiftSpree
 
       require 'image_loader'
 
-      loader = DataShift::SpreeEcom::ImageLoader.new(nil, options)
+      image_import(options)
+    end
 
-      loader.perform_load( options[:input], options )
+    no_commands do
+      def image_import(options)
+        importer = DataShift::SpreeEcom::MigrateImageLoader.new
+        importer.image_path_prefix = options[:image_path_prefix] if options[:image_path_prefix]
+
+        logger.info "Datashift: Starting Order Import from #{options[:input]}"
+
+        importer.configure_from( options[:config] ) if(options[:config])
+
+        importer.run(options[:input], DataShift::SpreeEcom.get_spree_class('Image'))
+      end
     end
 
 
