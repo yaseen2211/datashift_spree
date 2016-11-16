@@ -97,7 +97,10 @@ module DatashiftSpree
 
       raise "Cannot find suitable Paperclip Attachment Class" unless image_klass
 
-      loader_options = { :verbose => true }
+      loader_options = options.dup
+      loader_options[:verbose] = true
+
+      p loader_options
 
       owner_klass = DataShift::SpreeEcom::product_attachment_klazz
 
@@ -114,17 +117,17 @@ module DatashiftSpree
 
       loader_options[:attach_to_field] = 'images'
 
-      loader = DataShift::Paperclip::AttachmentLoader.new(image_klass, nil, loader_options)
-
       logger.info "Loading attachments from #{@attachment_path}"
 
-      attach_options = options.dup
-      attach_options[:add_prefix] = options[:sku_prefix]
+      ## prefix support dropped ??
+#      attach_options = options.dup
+#      attach_options[:add_prefix] = options[:sku_prefix]
 
-      puts "Setting prefix to [#{attach_options[:add_prefix]}]"
+#      puts "Setting prefix to [#{attach_options[:add_prefix]}]"
 
-      loader.process_from_filesystem(@attachment_path, attach_options.dup)
-
+      loader = DataShift::Paperclip::AttachmentLoader.new
+      loader.init_from_options(loader_options)
+      loader.run(@attachment_path, image_klass)
     end
 
   end
