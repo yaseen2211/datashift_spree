@@ -6,7 +6,7 @@ module DataShift
     class ShopifyCustomerLoader < SpreeBaseLoader
 
       # Options
-      #  
+      #
       #  :reload           : Force load of the method dictionary for object_class even if already loaded
       #  :verbose          : Verbose logging and to STDOUT
       #
@@ -79,7 +79,7 @@ module DataShift
                   logger.error "Address creation failed with error #{@load_object.errors.inspect}"
                   ship_address = nil
                 end
-                new_user = DataShift::SpreeEcom::get_user_class.create!("email" => user_email, "password" => "vinsol@123", @@address_type_id => ship_address.try(:id))
+                new_user = DataShift::SpreeEcom::get_user_class.create!("email" => user_email, "password" => SecureRandom.hex(16), @@address_type_id => ship_address.try(:id))
                 logger.info "New User with email #{user_email} and attributes #{new_user.inspect}"
               end
             else

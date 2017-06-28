@@ -120,7 +120,9 @@ module DataShift
           end
 
           def make_user
-            self.user = Spree::User.where(email: email).first_or_create!
+            self.user = Spree::User.where(email: email).first_or_create! do |user|
+              user.password = SecureRandom.hex(16)
+            end
           end
 
           def make_tax_adjustments(tax_rate, order, amount)
@@ -207,7 +209,7 @@ module DataShift
               # It resulted in creation of shipping rates again and failed on unique indexes :(
               #rate = shipment.shipping_rates.create!(shipping_method: shipping_method, cost: 0)
               #shipment.selected_shipping_rate_id = rate.id
-              shipment.update_columns(state: "shipped", shipped_at: fulfilled_at)
+              shipment.update_columns(state: "shipped", shipped_at: fulfilled_at.to_datetime)
               t = ShipmentRelated.new
               t.shipment_rate = shipment.selected_shipping_rate
               t.shipment = shipment
@@ -270,7 +272,6 @@ module DataShift
       end
 
       def perform_csv_load(file_name, options = {})
-
         order_patch_for_no_mails
 
         Spree::Config[:track_inventory_levels] = false
