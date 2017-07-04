@@ -63,7 +63,7 @@ module DatashiftSpree
         loader.configure_from( options[:config] )
       end
 
-      loader.perform_load(input, options)
+      loader.run(input, options)
     end
 
 
@@ -129,7 +129,7 @@ module DatashiftSpree
         loader.configure_from( options[:config] )
       end
 
-      loader.perform_load(input, options)
+      loader.run(input, options)
 
       # puts "Spree Order count now : #{Spree::Order.count}"
 
