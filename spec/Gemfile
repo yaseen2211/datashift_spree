@@ -5,7 +5,7 @@ gem "datashift_spree", path: '..'
 
 gem 'datashift', :git => 'https://github.com/autotelik/datashift.git', branch: :master
 
-# This Gemfile is for TESTING really. 
+# This Gemfile is for TESTING really.
 
 # DEFINE VERSIONS YOU WANT TO TEST AGAINST HERE
 # THIS SHOULD BASICALLY REPLICATE WHAT IS IN THE SANDBOX GEMFILE

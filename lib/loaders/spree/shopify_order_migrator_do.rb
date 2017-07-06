@@ -7,14 +7,14 @@
 #               Currently covers :
 #                 Orders
 #
-require 'spree_base_loader'
+require 'spree_loader_base'
 require 'spree_ecom'
 
 module DataShift
 
   module SpreeEcom
 
-    class ShopifyOrderLoader < SpreeBaseLoader
+    class ShopifyOrderLoader < SpreeLoaderBase
       module Shopify
         class RawOrder
           ORDER_HEADERS = [:name, :email, :financial_status, :paid_at, :fulfillment_status, :fulfilled_at, :accepts_marketing,
@@ -247,16 +247,22 @@ module DataShift
         end
       end
 
+      include SpreeLoading
+      include DataShift::ExcelBase
+
+      attr_accessor :import_file_name
+
       # Options
       #
       #  :reload           : Force load of the method dictionary for object_class even if already loaded
       #  :verbose          : Verbose logging and to STDOUT
       #
-      def initialize(klass, options = {})
+      def initialize(import_file_name, options = {})
         # We want the delegated methods so always include instance methods
-        opts = {:instance_methods => true }.merge( options )
+        @import_file_name = import_file_name
+        @options = {:instance_methods => true }.merge( options )
 
-        super( klass, nil, opts)
+        super()
 
         raise "Failed to create a #{klass.name} for loading" unless load_object
       end
@@ -266,12 +272,49 @@ module DataShift
       # Options:
       #   [:dummy]           : Perform a dummy run - attempt to load everything but then roll back
       #
-      def perform_load( file_name, opts = {} )
-        logger.info "Shopify perform_load for Orders from File [#{file_name}]"
-        super(file_name, opts)
+
+      def run
+        logger.info "Shopify perform_load for Orders from File [#{import_file_name}]"
+        super(import_file_name, order_klass)
       end
 
-      def perform_csv_load(file_name, options = {})
+      def perform_load
+        require 'csv'
+
+        raise "Cannot load - failed to create a #{klass}" unless load_object
+        perform_load_on_file
+      end
+
+      def perform_load_on_file
+
+        raise DataShift::BadFile, "Cannot load #{file_name} file not found." unless File.exist?(file_name)
+
+        ext = File.extname(file_name)
+
+        if ext.casecmp('.xls') == 0 || ext.casecmp('.xlsx') == 0
+          perform_excel_load
+        elsif ext.casecmp('.csv') == 0
+          perform_csv_load
+        else
+          raise DataShift::UnsupportedFileType, "#{ext} files not supported - Try .csv or OpenOffice/Excel .xls"
+        end
+
+      end
+
+      def perform_csv_load
+        logger.info "Starting bulk load from CSV : #{file_name}"
+
+        parsed_file = CSV.read(file_name)
+
+        # assume headers are row 0
+        header_idx = 0
+        header_row = parsed_file.shift
+
+        set_headers( DataShift::Headers.new(:csv, header_idx, header_row) )
+
+        # maps list of headers into suitable calls on the Active Record class
+        bind_headers(headers)
+
         order_patch_for_no_mails
 
         Spree::Config[:track_inventory_levels] = false
@@ -290,6 +333,7 @@ module DataShift
         # "Tax 5 Name","Tax 5 Value"
         order_count = 0
         last_order = nil
+
         CSV.foreach(file_name, headers: true, header_converters: :symbol, encoding: 'ISO-8859-1') do |row|
           if(row.empty?)
             logger.info "Finished - Last Row #{row}"
@@ -357,6 +401,7 @@ module DataShift
                 last_order.order.state = "complete"
                 last_order.order.payment_state = "paid"
                 last_order.order.shipment_state = "shipped"
+                last_order.order.payment_total = last_order.order.payments.completed.sum(:amount)
                 last_order.order.completed_at = Time.now - 1.day
                 last_order.order.save!
               end

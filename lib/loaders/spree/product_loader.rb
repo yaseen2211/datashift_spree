@@ -23,10 +23,9 @@ module DataShift
 
       delegate :configure_from, to: :datashift_loader
 
-      def initialize(file_name)
-
+      def initialize(file_name, options = {})
         @file_name = file_name
-
+        @options = options
         # gets a file type specific loader e.g csv, excel
         @datashift_loader = DataShift::Loader::Factory.get_loader(file_name)
       end
@@ -36,11 +35,7 @@ module DataShift
       # See delegate_belongs_to :master @ https://github.com/spree/spree/blob/master/core/app/models/spree/product.rb
       #
       def force_inclusion_columns
-        @force_inclusion_columns ||= %w{ cost_price
-                                         images
-                                         price
-                                         shipping_category
-                                         sku
+        @force_inclusion_columns ||= %w{ images
                                          stock_items
                                          variant_sku
                                          variant_cost_price
@@ -50,13 +45,13 @@ module DataShift
       end
 
       def run
-
         logger.info "Product load from File [#{file_name}]"
 
         DataShift::PopulatorFactory.global_populator_class = DataShift::SpreeEcom::ProductPopulator
 
-        DataShift::Configuration.call.force_inclusion_of_columns = force_inclusion_columns
+        DataShift::Configuration.call.mandatory = @options[:mandatory] if @options[:mandatory]
 
+        DataShift::Configuration.call.force_inclusion_of_columns = force_inclusion_columns
         datashift_loader.run(file_name, Spree::Product)
       end
 

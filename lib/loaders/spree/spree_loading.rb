@@ -57,6 +57,18 @@ module DataShift
       @variant_klass  ||= DataShift::SpreeEcom::get_spree_class('Variant')
     end
 
+    def address_klass
+      @address_klass  ||= DataShift::SpreeEcom::get_spree_class('Address')
+    end
+
+    def user_klass
+      @user_klass  ||= DataShift::SpreeEcom::get_spree_class('User')
+    end
+
+    def order_klass
+      @order_klass  ||= DataShift::SpreeEcom::get_spree_class('Order')
+    end
+
     # Test and code for this saved at : http://www.rubular.com/r/1de2TZsVJz
 
     def spree_uri_regexp
@@ -74,8 +86,8 @@ module DataShift
     #
     # Multiple image items can be delimited by multi_assoc_delim
     #
-    # Each item can  contain optional attributes for the Image class within {}. 
-    # 
+    # Each item can  contain optional attributes for the Image class within {}.
+    #
     # For example to supply the optional 'alt' text, or position for an image
     #
     #   Example => path_1{:alt => text}|path_2{:alt => more alt blah blah,

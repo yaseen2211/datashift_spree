@@ -15,7 +15,7 @@ module DataShift
     include DataShift::SpreeLoading
 
     def initialize
-      super
+      super()
     end
 
   end

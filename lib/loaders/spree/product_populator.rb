@@ -19,11 +19,9 @@ module DataShift
       attr_reader :product_load_object
 
       def prepare_and_assign_method_binding(method_binding, record, data)
-
         prepare_data(method_binding, data)
 
         @product_load_object = record
-
         logger.debug("Populating data via Spree specific ProductPopulator")
 
         logger.debug("Populating data via Spree specific ProductPopulator [#{method_binding.operator}] - [#{data}]")
@@ -105,13 +103,25 @@ module DataShift
 
           add_variants_stock(data)
 
+        elsif method_binding_for_variant?(method_binding) && product_load_object.variants.size == 0
+
+          puts "WARNING: #{ method_binding.operator } with value - #{ data } can not be set because variants not found."
+
         else
+
           super(method_binding, product_load_object, data) if(data)
+
         end
 
       end
 
       private
+
+        def fetch_or_create_default_stock_location
+          stock_location_klass.where(default: true).first_or_create do |stock_location|
+            stock_location.name = 'default'
+          end
+        end
 
       # Special case for OptionTypes as it's two stage process
       # First add the possible option_types to Product, then we are able
@@ -130,6 +140,11 @@ module DataShift
       #
       #     mime_type:jpeg;print_type:black_white|mime_type:jpeg|mime_type:png, PDF;print_type:colour
       #
+
+      def method_binding_for_variant?(method_binding)
+        method_binding.operator.in?(['variant_sku', 'variant_images', 'variant_images', 'variant_price', 'variant_cost_price'])
+      end
+
       def build_option_types(option_types)
 
         optiontype_vlist_map = {}
@@ -144,7 +159,7 @@ module DataShift
             option_type = option_type_klass.create(:name => oname, :presentation => oname.humanize)
 
             unless option_type
-              logger.warm("WARNING: OptionType #{oname} NOT found and could not create - Not set Product")
+              logger.warn("WARNING: OptionType #{oname} NOT found and could not create - Not set Product")
               next
             end
             logger.info "Created missing OptionType #{option_type.inspect}"
@@ -182,7 +197,6 @@ module DataShift
       end
 
       def add_options_variants
-
         # TODO smart column ordering to ensure always valid by time we get to associations
         begin
           product_load_object.save_if_new
@@ -198,7 +212,6 @@ module DataShift
         #     => 2 Variants on different OpTypes, mime_type and print_type
         #
         variant_chain =  value.to_s.split( multi_assoc_delim )
-
         variant_chain.each do |per_variant|
 
           option_types = per_variant.split(multi_facet_delim)    # => [mime_type:jpeg, print_type:black_white]
@@ -367,14 +380,12 @@ module DataShift
       end
 
       def add_variants_stock(data)
-
         product_load_object.save_if_new
 
         # do we have Variants?
         if(@product_load_object.variants.size > 0)
 
           logger.info "[COUNT_ON_HAND] - number of variants to process #{@product_load_object.variants.size}"
-
           if(data.to_s.include?(multi_assoc_delim))
             # Check if we've already processed Variants and assign count per variant
             values = data.to_s.split(multi_assoc_delim)
@@ -388,15 +399,18 @@ module DataShift
           stock_coh_list = value.to_s.split(multi_assoc_delim) # we expect to get corresponding stock_location:count_on_hand for every variant
 
           stock_coh_list.each_with_index do |stock_coh, i|
-
             # count_on_hand column MUST HAVE "stock_location_name:variant_count_on_hand" format
-            stock_location_name, variant_count_on_hand = stock_coh.split(name_value_delim)
+            if(stock_coh.to_s.include?(name_value_delim))
+              stock_location_name, variant_count_on_hand = stock_coh.split(name_value_delim)
+            else
+              stock_location_name, variant_count_on_hand = [nil, stock_coh.to_i]
+            end
 
             logger.info "Setting #{variant_count_on_hand} items for stock location #{stock_location_name}..."
 
-            if not stock_location_name # No Stock Location referenced, fallback to default one...
+            if not stock_location_name.present? # No Stock Location referenced, fallback to default one...
               logger.info "No Stock Location was referenced. Adding count_on_hand to default Stock Location. Use 'stock_location_name:variant_count_on_hand' format to specify prefered Stock Location"
-              stock_location = stock_location_klass.where(:default => true).first
+              stock_location = fetch_or_create_default_stock_location
               raise "WARNING: Can't set count_on_hand as no Stock Location exists!" unless stock_location
             else # go with the one specified...
               stock_location = stock_location_klass.where(:name => stock_location_name).first
@@ -422,11 +436,15 @@ module DataShift
             stock_location_name, master_count_on_hand = (data.to_s.split(multi_assoc_delim).first).split(name_value_delim)
             puts "WARNING: Multiple count_on_hand values specified but no Variants/OptionTypes created"
           else
-            stock_location_name, master_count_on_hand = data.split(name_value_delim)
+            if(data.to_s.include?(name_value_delim))
+              stock_location_name, master_count_on_hand = data.split(name_value_delim)
+            else
+              stock_location_name, master_count_on_hand = [nil, data.to_i]
+            end
           end
-          if not stock_location_name # No Stock Location referenced, fallback to default one...
+          if not stock_location_name.present? # No Stock Location referenced, fallback to default one...
             logger.info "No Stock Location was referenced. Adding count_on_hand to default Stock Location. Use 'stock_location_name:master_count_on_hand' format to specify prefered Stock Location"
-            stock_location = stock_location_klass.where(:default => true).first
+            stock_location = fetch_or_create_default_stock_location
             raise "WARNING: Can't set count_on_hand as no Stock Location exists!" unless stock_location
           else # go with the one specified...
             stock_location = stock_location_klass.where(:name => stock_location_name).first
@@ -446,9 +464,7 @@ module DataShift
       end
 
       def add_variant_images(data)
-
         product_load_object.save_if_new
-
         # do we have Variants?
         if(@product_load_object.variants.size > 0)
 
@@ -504,7 +520,6 @@ module DataShift
                 else
                   attributes = {} # will blow things up later if we pass nil where {} expected
                 end
-
                 agent = Mechanize.new
 
                 image = begin
@@ -588,6 +603,7 @@ module DataShift
           # ... or just single Master Product?
         elsif(@product_load_object.variants.size == 0)
 
+          return true # as variant_images is not defined, also assume no image
           if(data.to_s.include?(multi_value_delim))
             # multiple images
             images = data.to_s.split(multi_value_delim)
