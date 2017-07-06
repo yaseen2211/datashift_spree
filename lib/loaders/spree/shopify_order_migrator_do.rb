@@ -357,6 +357,7 @@ module DataShift
                 last_order.order.state = "complete"
                 last_order.order.payment_state = "paid"
                 last_order.order.shipment_state = "shipped"
+                last_order.order.payment_total = last_order.order.payments.completed.sum(:amount)
                 last_order.order.completed_at = Time.now - 1.day
                 last_order.order.save!
               end
