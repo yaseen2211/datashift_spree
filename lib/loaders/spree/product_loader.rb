@@ -49,7 +49,7 @@ module DataShift
 
         DataShift::PopulatorFactory.global_populator_class = DataShift::SpreeEcom::ProductPopulator
 
-        DataShift::Configuration.call.mandatory = @options[:mandatory] if @options[:mandatory]
+        DataShift::Configuration.call.mandatory = @options[:mandatory] || []
 
         DataShift::Configuration.call.force_inclusion_of_columns = force_inclusion_columns
         datashift_loader.run(file_name, Spree::Product)

@@ -42,7 +42,7 @@ module DataShift
       def run
         logger.info "Users with their address load from File [#{file_name}]"
 
-        DataShift::Configuration.call.mandatory = @options[:mandatory] if @options[:mandatory]
+        DataShift::Configuration.call.mandatory = @options[:mandatory] || []
         DataShift::Configuration.call.force_inclusion_of_columns = force_inclusion_columns
 
         datashift_loader.run(file_name, address_klass, self)

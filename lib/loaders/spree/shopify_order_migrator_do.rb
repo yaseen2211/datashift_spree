@@ -274,6 +274,7 @@ module DataShift
       #
 
       def run
+        DataShift::Configuration.call.mandatory = @options[:mandatory] || []
         logger.info "Shopify perform_load for Orders from File [#{import_file_name}]"
         super(import_file_name, order_klass)
       end
